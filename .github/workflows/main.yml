@@ -13,21 +13,20 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # This repository was created by copying a source ZIP, so the
-    # wii-emucommon submodule link may not be present in Git metadata.
-    - name: Fetch wii-emucommon dependency
+    # The source was imported from a ZIP, so Git submodule metadata for
+    # wii-emucommon is not available in this new repository. Clone it with
+    # all nested submodules (including SDL), otherwise SDL has no Makefile.
+    - name: Fetch wii-emucommon and nested dependencies
       run: |
-        if [ ! -f wii-emucommon/dist.sh ]; then
-          rm -rf wii-emucommon
-          git clone --depth 1 https://github.com/raz0red/wii-emucommon.git wii-emucommon
-        fi
+        rm -rf wii-emucommon
+        git clone --recurse-submodules https://github.com/raz0red/wii-emucommon.git wii-emucommon
 
-    # ZIP-based source imports do not preserve executable bits.
+    # ZIP imports do not preserve executable bits on shell scripts.
     - name: Fix build script permissions
       run: chmod +x dist.sh wii-emucommon/dist.sh
 
-    - run: docker run raz0red/devkitppc /opt/devkitpro/pacman/bin/pacman -Q
-    - run: docker run -v $(pwd):/source raz0red/devkitppc /bin/bash /source/dist.sh /tmp/wiimednafen
+    - name: Build WiiMednafen
+      run: docker run -v "$(pwd):/source" raz0red/devkitppc /bin/bash /source/dist.sh /tmp/wiimednafen
 
     - uses: actions/upload-artifact@v4
       with:
