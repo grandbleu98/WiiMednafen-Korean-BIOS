@@ -15,6 +15,10 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
+    # ZIP downloads do not preserve executable bits on shell scripts.
+    # Restore them before running the build inside the container.
+    - name: Fix build script permissions
+      run: chmod +x dist.sh wii-emucommon/dist.sh
     - run: docker run raz0red/devkitppc /opt/devkitpro/pacman/bin/pacman -Q
     - run: docker run -v $(pwd):/source raz0red/devkitppc /source/dist.sh /tmp/wiimednafen
     - uses: actions/upload-artifact@v4
