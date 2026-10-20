@@ -16,6 +16,7 @@
 */
 
 #include "main.h"
+#include "../general.h"  // MDFN_MakeFName and MDFNMKF_FIRMWARE
 
 #ifdef WIN32
 #include <windows.h>
