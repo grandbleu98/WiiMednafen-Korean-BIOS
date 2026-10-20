@@ -824,6 +824,34 @@ static int game_name_compare(const void* a, const void* b) {
  *
  * @param   menu The menu to read the games into
  */
+/*
+ * Hide CD data tracks from the ROM browser when a matching CUE sheet exists.
+ * Keep standalone .bin/.img files visible so cartridge ROMs and disc images
+ * without a CUE file are not accidentally hidden.
+ */
+static BOOL wii_is_cue_backed_data_file(const char* roms, const char* filename) {
+    const char* dot = strrchr(filename, '.');
+    if (dot == NULL || (strcasecmp(dot, ".bin") != 0 &&
+                        strcasecmp(dot, ".img") != 0)) {
+        return FALSE;
+    }
+
+    char cue_path[WII_MAX_PATH];
+    int stem_length = (int)(dot - filename);
+    int written = snprintf(cue_path, sizeof(cue_path), "%s/%.*s.cue",
+                           roms, stem_length, filename);
+    if (written < 0 || (size_t)written >= sizeof(cue_path)) {
+        return FALSE;
+    }
+
+    FILE* cue = fopen(cue_path, "rb");
+    if (cue == NULL) {
+        return FALSE;
+    }
+    fclose(cue);
+    return TRUE;
+}
+
 static void wii_read_game_list(TREENODE* menu) {
     const char* roms = wii_get_roms_dir();
 
@@ -848,6 +876,11 @@ static void wii_read_game_list(TREENODE* menu) {
             while ((entry = readdir(romdir)) != NULL) {
                 if ((strcmp(".", entry->d_name) &&
                      strcmp("..", entry->d_name))) {
+                    /* Show the CUE entry, not its paired BIN/IMG data file. */
+                    if (entry->d_type != DT_DIR &&
+                        wii_is_cue_backed_data_file(roms, entry->d_name)) {
+                        continue;
+                    }
                     TREENODE* child = wii_create_tree_node(
                         (entry->d_type == DT_DIR ? NODETYPE_DIR : NODETYPE_ROM),
                         entry->d_name);
