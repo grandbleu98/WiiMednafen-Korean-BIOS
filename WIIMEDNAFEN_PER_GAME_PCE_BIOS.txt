@@ -1,0 +1,13 @@
+WiiMednafen: per-game PC Engine CD BIOS selection
+
+Place a per-game BIOS directly in the configured firmware directory with the same basename as the selected game image.
+Example:
+  Game image: roms/PC Engine/Example Game.cue
+  BIOS file:  firmware/Example Game.pce
+
+Supported BIOS extensions (checked in order): .pce, .bin, .rom, .bios
+If no matching per-game BIOS exists, the configured default pce_fast.cdbios is restored.
+The BIOS file is selected after the previous game is closed and before the new game is loaded.
+
+This is a source modification and has not yet been compiled or tested on a Wii console.
+No BIOS files are included.
