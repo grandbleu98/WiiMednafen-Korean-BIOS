@@ -8,19 +8,27 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-    # ZIP downloads do not preserve executable bits on shell scripts.
-    # Restore them before running the build inside the container.
+
+    # This repository was created by copying a source ZIP, so the
+    # wii-emucommon submodule link may not be present in Git metadata.
+    - name: Fetch wii-emucommon dependency
+      run: |
+        if [ ! -f wii-emucommon/dist.sh ]; then
+          rm -rf wii-emucommon
+          git clone --depth 1 https://github.com/raz0red/wii-emucommon.git wii-emucommon
+        fi
+
+    # ZIP-based source imports do not preserve executable bits.
     - name: Fix build script permissions
       run: chmod +x dist.sh wii-emucommon/dist.sh
+
     - run: docker run raz0red/devkitppc /opt/devkitpro/pacman/bin/pacman -Q
-    - run: docker run -v $(pwd):/source raz0red/devkitppc /source/dist.sh /tmp/wiimednafen
+    - run: docker run -v $(pwd):/source raz0red/devkitppc /bin/bash /source/dist.sh /tmp/wiimednafen
+
     - uses: actions/upload-artifact@v4
       with:
         name: dist
