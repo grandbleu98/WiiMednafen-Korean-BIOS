@@ -566,6 +566,47 @@ EndFrameTest: ;
 #endif
 
 
+
+#ifdef WII
+/*
+ * CUE sheets commonly contain UTF-8 filenames without a BOM.
+ * Older Wii code treated every BOM-less filename as the local ANSI
+ * codepage and converted it again, corrupting Korean UTF-8 names.
+ */
+static bool WiiIsValidUTF8(const unsigned char *s)
+{
+  if(!s) return false;
+  while(*s)
+  {
+    if(*s < 0x80) { s++; continue; }
+    if((*s & 0xE0) == 0xC0)
+    {
+      if(s[1] == 0 || (s[1] & 0xC0) != 0x80 || *s < 0xC2) return false;
+      s += 2;
+    }
+    else if((*s & 0xF0) == 0xE0)
+    {
+      if(s[1] == 0 || s[2] == 0 ||
+         (s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80) return false;
+      if(*s == 0xE0 && s[1] < 0xA0) return false;
+      if(*s == 0xED && s[1] >= 0xA0) return false;
+      s += 3;
+    }
+    else if((*s & 0xF8) == 0xF0)
+    {
+      if(s[1] == 0 || s[2] == 0 || s[3] == 0 ||
+         (s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 ||
+         (s[3] & 0xC0) != 0x80) return false;
+      if(*s > 0xF4 || (*s == 0xF0 && s[1] < 0x90) ||
+         (*s == 0xF4 && s[1] >= 0x90)) return false;
+      s += 4;
+    }
+    else return false;
+  }
+  return true;
+}
+#endif
+
 static CDRFile *ImageOpen(const char *path)
 {
   CDRFile *ret = (CDRFile *)MDFN_calloc(1, sizeof(CDRFile), "cdrfile");
@@ -835,13 +876,14 @@ RETRYLINE:
           memset(&TmpTrack, 0, sizeof(TmpTrack));
           active_track = -1;
         }
-#ifdef WII        
-        if( !isutf8 )
+#ifdef WII
+        bool filename_is_utf8 = isutf8 || WiiIsValidUTF8((const unsigned char*)args[0]);
+        if(!filename_is_utf8)
         {
-          Util_ansitoUTF8( (unsigned char*)args[0], (unsigned char*)argutf8 );
-          MDFN_printf( "Converted to UTF-8: %s, %s\n", args[0], argutf8 );
-        }        
-        std::string efn = MDFN_MakeFName(MDFNMKF_AUX, 0, isutf8 ? args[0] : argutf8 );      
+          Util_ansitoUTF8((unsigned char*)args[0], (unsigned char*)argutf8);
+          MDFN_printf("Converted CUE filename to UTF-8: %s -> %s\n", args[0], argutf8);
+        }
+        std::string efn = MDFN_MakeFName(MDFNMKF_AUX, 0, filename_is_utf8 ? args[0] : argutf8);      
 #else
         std::string efn = MDFN_MakeFName(MDFNMKF_AUX, 0, args[0]);      
 #endif
