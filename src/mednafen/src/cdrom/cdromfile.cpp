@@ -1169,8 +1169,10 @@ static CDRFile *ImageOpenCHD(const char *path)
   char metadata[256];
   UINT32 metadata_len = 0, metadata_tag = 0;
   UINT8 metadata_flags = 0;
-  int32 running_lba = 0;
-  uint32 stored_frames = 0;
+  // CHD v5 aligns each track's stored frames to a 4-sector boundary.
+  // Keep the logical disc LBA separate from the physical frame offset in the CHD.
+  int32 running_lba = -150;
+  uint64 stored_frames = 0;
   int track_count = 0;
 
   ret->chd_fp = fopen(path, "rb");
@@ -1217,7 +1219,7 @@ static CDRFile *ImageOpenCHD(const char *path)
       if(idx == 0)
       {
         chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret);
-        MDFN_PrintError(_("CHD has no CD track metadata: %s\n"), path);
+        MDFN_PrintError(_("CHD has no CD track metadata: %s\\n"), path);
         return NULL;
       }
       break;
@@ -1227,15 +1229,22 @@ static CDRFile *ImageOpenCHD(const char *path)
         "TRACK:%d TYPE:%31s SUBTYPE:%31s FRAMES:%d PREGAP:%d PGTYPE:%31s PGSUB:%31s POSTGAP:%d",
         &track_no, type, subtype, &frames, &pregap, pgtype, pgsub, &postgap);
     if(parsed < 4 || track_no < 1 || track_no > 99 || frames <= 0) continue;
-    if(parsed < 8) { pregap = 0; postgap = 0; }
+    if(parsed < 8) { pregap = 0; postgap = 0; pgtype[0] = 0; }
+
+    // CHD's virtual pregap is counted in FRAMES but is not represented by
+    // stored sector data at the start of the track. Physical offsets and
+    // logical LBAs therefore need separate accounting.
+    const int virtual_pregap = (parsed >= 8 && pgtype[0] == 'V') ? pregap : 0;
+    const int logical_pregap = (track_count == 0) ? 150 :
+        ((parsed >= 8 && pgtype[0] != 'V') ? pregap : 0);
 
     CDRFILE_TRACK_INFO *track = &ret->Tracks[track_no];
     memset(track, 0, sizeof(*track));
-    track->LBA = running_lba + pregap;
-    track->pregap = pregap;
+    track->LBA = running_lba + logical_pregap + virtual_pregap;
+    track->pregap = logical_pregap;
     track->index = 1;
-    track->sectors = frames;
-    track->FileOffset = (long)((uint64)stored_frames * ret->chd_unitbytes);
+    track->sectors = frames - virtual_pregap;
+    track->FileOffset = (long)((stored_frames + virtual_pregap) * ret->chd_unitbytes);
     track->FirstFileInstance = FALSE;
     track->SubchannelMode = (ret->chd_unitbytes >= 2448) ? CDRF_SUBM_RW_RAW : CDRF_SUBM_NONE;
 
@@ -1248,15 +1257,19 @@ static CDRFile *ImageOpenCHD(const char *path)
     else if(!strcasecmp(type, "MODE2_RAW") || !strcasecmp(type, "MODE2/2352")) track->DIFormat = DI_FORMAT_MODE2_RAW;
     else
     {
-      MDFN_PrintError(_("Unsupported CHD track type: %s\n"), type);
+      MDFN_PrintError(_("Unsupported CHD track type: %s\\n"), type);
       chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret); return NULL;
     }
     track->Format = (track->DIFormat == DI_FORMAT_AUDIO) ? CD_TRACK_FORMAT_AUDIO : CD_TRACK_FORMAT_DATA;
     ret->FirstTrack = (track_count == 0) ? track_no : ret->FirstTrack;
     track_count++;
     ret->NumTracks = track_count;
-    stored_frames += frames;
-    running_lba = track->LBA + frames + postgap;
+
+    // CHD v5 pads each track to a four-frame boundary. The padding is part
+    // of the physical CHD stream, not part of the emulated disc's LBA space.
+    stored_frames += frames + postgap;
+    stored_frames += ((frames + 3) & ~3) - frames;
+    running_lba = track->LBA + track->sectors + postgap;
   }
 
   if(!track_count || ret->chd_unitbytes < 2048)
