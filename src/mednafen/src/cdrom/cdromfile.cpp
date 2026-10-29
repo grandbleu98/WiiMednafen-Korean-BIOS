@@ -1328,16 +1328,53 @@ int cdrfile_read_raw_sector(CDRFile *p_cdrfile, uint8 *buf, int32 lba)
       { memset(buf, 0, 2352 + 96); return 0; }
 
       const uint8 *raw = p_cdrfile->chd_hunk + offset;
-      if(p_cdrfile->chd_unitbytes >= 2352)
+      /*
+       * CHD v5 can use a 2448-byte unit size even for tracks whose actual
+       * sector payload is only 2048 or 2336 bytes. Select the layout from
+       * the track metadata, not the global unit size, or padded MODE1
+       * sectors will be mistaken for 2352-byte raw sectors and fail CD
+       * system detection.
+       */
+      switch(ct->DIFormat)
       {
+      case DI_FORMAT_AUDIO:
+      case DI_FORMAT_MODE1_RAW:
+      case DI_FORMAT_MODE2_RAW:
+        if(p_cdrfile->chd_unitbytes < 2352) { memset(buf, 0, 2352 + 96); return 0; }
         memcpy(buf, raw, 2352);
         if(p_cdrfile->chd_unitbytes >= 2448) memcpy(buf + 2352, raw + 2352, 96);
+        break;
+
+      case DI_FORMAT_MODE1:
+        if(p_cdrfile->chd_unitbytes < 2048) { memset(buf, 0, 2352 + 96); return 0; }
+        memset(buf, 0, 2352);
+        memcpy(buf + 16, raw, 2048);
+        lec_encode_mode1_sector(lba + 150, buf);
+        break;
+
+      case DI_FORMAT_MODE2:
+        if(p_cdrfile->chd_unitbytes < 2336) { memset(buf, 0, 2352 + 96); return 0; }
+        memset(buf, 0, 2352);
+        memcpy(buf + 16, raw, 2336);
+        lec_encode_mode2_sector(lba + 150, buf);
+        break;
+
+      case DI_FORMAT_MODE2_FORM1:
+        if(p_cdrfile->chd_unitbytes < 2048) { memset(buf, 0, 2352 + 96); return 0; }
+        memset(buf, 0, 2352);
+        memcpy(buf + 24, raw, 2048);
+        break;
+
+      case DI_FORMAT_MODE2_FORM2:
+        if(p_cdrfile->chd_unitbytes < 2324) { memset(buf, 0, 2352 + 96); return 0; }
+        memset(buf, 0, 2352);
+        memcpy(buf + 24, raw, 2324);
+        break;
+
+      default:
+        memset(buf, 0, 2352 + 96);
+        return 0;
       }
-      else if(ct->DIFormat == DI_FORMAT_MODE1 && p_cdrfile->chd_unitbytes >= 2048)
-      {
-        memset(buf, 0, 2352); memcpy(buf + 16, raw, 2048); lec_encode_mode1_sector(lba + 150, buf);
-      }
-      else { memset(buf, 0, 2352 + 96); return 0; }
       cdrfile_deinterleave_subq(buf + 2352, qbuf);
       return 1;
     }
