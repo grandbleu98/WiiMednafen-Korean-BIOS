@@ -31,6 +31,10 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <stdlib.h>
+#ifdef WII
+#include <libchdr/chd.h>
+#endif
 #include <trio/trio.h>
 
 #include "../general.h"
@@ -85,6 +89,14 @@ struct CDRFile
   int32 FirstTrack;
   int32 total_sectors;
   CDRFILE_TRACK_INFO Tracks[100]; // Track #0(HMM?) through 99
+#ifdef WII
+  chd_file *chd;
+  FILE *chd_fp;
+  uint8 *chd_hunk;
+  uint32 chd_hunkbytes;
+  uint32 chd_unitbytes;
+  uint32 chd_cached_hunk;
+#endif
 
 #ifdef HAVE_LIBCDIO
   CdIo *p_cdio;
@@ -249,6 +261,17 @@ static uint32 GetSectorCount(CDRFILE_TRACK_INFO *track)
 
 void cdrfile_destroy(CDRFile *p_cdrfile)
 {
+#ifdef WII
+  if(p_cdrfile->chd)
+  {
+    chd_close(p_cdrfile->chd);
+    p_cdrfile->chd = NULL;
+    if(p_cdrfile->chd_fp) fclose(p_cdrfile->chd_fp);
+    free(p_cdrfile->chd_hunk);
+    MDFN_free(p_cdrfile);
+    return;
+  }
+#endif
 #ifdef HAVE_LIBCDIO
   if(p_cdrfile->p_cdio)
     cdio_destroy(p_cdrfile->p_cdio);
@@ -1139,10 +1162,123 @@ RETRYLINE:
 }
 
 
+#ifdef WII
+static CDRFile *ImageOpenCHD(const char *path)
+{
+  CDRFile *ret = (CDRFile *)MDFN_calloc(1, sizeof(CDRFile), "chd-cdrfile");
+  char metadata[256];
+  UINT32 metadata_len = 0, metadata_tag = 0;
+  UINT8 metadata_flags = 0;
+  int32 running_lba = 0;
+  uint32 stored_frames = 0;
+  int track_count = 0;
+
+  ret->chd_fp = fopen(path, "rb");
+  if(!ret->chd_fp)
+  {
+    ErrnoHolder ene(errno);
+    MDFN_PrintError(_("Error opening CHD \"%s\": %s\n"), path, ene.StrError());
+    MDFN_free(ret);
+    return NULL;
+  }
+  if(chd_open_file(ret->chd_fp, CHD_OPEN_READ, NULL, &ret->chd) != CHDERR_NONE)
+  {
+    MDFN_PrintError(_("Could not open CHD image \"%s\".\n"), path);
+    fclose(ret->chd_fp);
+    MDFN_free(ret);
+    return NULL;
+  }
+
+  const chd_header *header = chd_get_header(ret->chd);
+  if(!header || !header->hunkbytes)
+  {
+    chd_close(ret->chd); fclose(ret->chd_fp); MDFN_free(ret); return NULL;
+  }
+  ret->chd_hunkbytes = header->hunkbytes;
+  ret->chd_unitbytes = header->unitbytes ? header->unitbytes : 2448;
+  ret->chd_cached_hunk = 0xFFFFFFFF;
+  ret->chd_hunk = (uint8 *)malloc(ret->chd_hunkbytes);
+  if(!ret->chd_hunk)
+  {
+    chd_close(ret->chd); fclose(ret->chd_fp); MDFN_free(ret); return NULL;
+  }
+
+  for(UINT32 idx = 0; idx < 99; idx++)
+  {
+    int track_no = 0, frames = 0, pregap = 0, postgap = 0;
+    char type[32] = {0}, subtype[32] = {0}, pgtype[32] = {0}, pgsub[32] = {0};
+    chd_error err = chd_get_metadata(ret->chd, CDROM_TRACK_METADATA2_TAG, idx,
+        metadata, sizeof(metadata) - 1, &metadata_len, &metadata_tag, &metadata_flags);
+    if(err != CHDERR_NONE)
+      err = chd_get_metadata(ret->chd, CDROM_TRACK_METADATA_TAG, idx,
+          metadata, sizeof(metadata) - 1, &metadata_len, &metadata_tag, &metadata_flags);
+    if(err != CHDERR_NONE)
+    {
+      if(idx == 0)
+      {
+        chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret);
+        MDFN_PrintError(_("CHD has no CD track metadata: %s\n"), path);
+        return NULL;
+      }
+      break;
+    }
+    metadata[sizeof(metadata) - 1] = 0;
+    int parsed = sscanf(metadata,
+        "TRACK:%d TYPE:%31s SUBTYPE:%31s FRAMES:%d PREGAP:%d PGTYPE:%31s PGSUB:%31s POSTGAP:%d",
+        &track_no, type, subtype, &frames, &pregap, pgtype, pgsub, &postgap);
+    if(parsed < 4 || track_no < 1 || track_no > 99 || frames <= 0) continue;
+    if(parsed < 8) { pregap = 0; postgap = 0; }
+
+    CDRFILE_TRACK_INFO *track = &ret->Tracks[track_no];
+    memset(track, 0, sizeof(*track));
+    track->LBA = running_lba + pregap;
+    track->pregap = pregap;
+    track->index = 1;
+    track->sectors = frames;
+    track->FileOffset = (long)((uint64)stored_frames * ret->chd_unitbytes);
+    track->FirstFileInstance = FALSE;
+    track->SubchannelMode = (ret->chd_unitbytes >= 2448) ? CDRF_SUBM_RW_RAW : CDRF_SUBM_NONE;
+
+    if(!strcasecmp(type, "AUDIO")) track->DIFormat = DI_FORMAT_AUDIO;
+    else if(!strcasecmp(type, "MODE1") || !strcasecmp(type, "MODE1/2048")) track->DIFormat = DI_FORMAT_MODE1;
+    else if(!strcasecmp(type, "MODE1_RAW") || !strcasecmp(type, "MODE1/2352")) track->DIFormat = DI_FORMAT_MODE1_RAW;
+    else if(!strcasecmp(type, "MODE2") || !strcasecmp(type, "MODE2/2336")) track->DIFormat = DI_FORMAT_MODE2;
+    else if(!strcasecmp(type, "MODE2_FORM1") || !strcasecmp(type, "MODE2/2048")) track->DIFormat = DI_FORMAT_MODE2_FORM1;
+    else if(!strcasecmp(type, "MODE2_FORM2") || !strcasecmp(type, "MODE2/2324")) track->DIFormat = DI_FORMAT_MODE2_FORM2;
+    else if(!strcasecmp(type, "MODE2_RAW") || !strcasecmp(type, "MODE2/2352")) track->DIFormat = DI_FORMAT_MODE2_RAW;
+    else
+    {
+      MDFN_PrintError(_("Unsupported CHD track type: %s\n"), type);
+      chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret); return NULL;
+    }
+    track->Format = (track->DIFormat == DI_FORMAT_AUDIO) ? CD_TRACK_FORMAT_AUDIO : CD_TRACK_FORMAT_DATA;
+    ret->FirstTrack = (track_count == 0) ? track_no : ret->FirstTrack;
+    track_count++;
+    ret->NumTracks = track_count;
+    stored_frames += frames;
+    running_lba = track->LBA + frames + postgap;
+  }
+
+  if(!track_count || ret->chd_unitbytes < 2048)
+  {
+    chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret); return NULL;
+  }
+  ret->total_sectors = running_lba;
+  return ret;
+}
+#endif
+
 CDRFile *cdrfile_open(const char *path)
 {
   struct stat stat_buf;
   CDRFile *ret;
+#ifdef WII
+  if(path)
+  {
+    const char *ext = strrchr(path, '.');
+    if(ext && !strcasecmp(ext, ".chd")) return ImageOpenCHD(path);
+  }
+#endif
 
 #ifdef HAVE_LIBCDIO
   if(path == NULL || stat(path, &stat_buf) || !S_ISREG(stat_buf.st_mode))
@@ -1169,6 +1305,46 @@ int cdrfile_read_raw_sector(CDRFile *p_cdrfile, uint8 *buf, int32 lba)
   MakeSubQ(p_cdrfile, lba, buf + 2352);
 
   cdrfile_deinterleave_subq(buf + 2352, SimuQ);
+#ifdef WII
+  if(p_cdrfile->chd)
+  {
+    for(int32 ti = p_cdrfile->FirstTrack; ti < p_cdrfile->FirstTrack + p_cdrfile->NumTracks; ti++)
+    {
+      CDRFILE_TRACK_INFO *ct = &p_cdrfile->Tracks[ti];
+      if(lba < ct->LBA - ct->pregap || lba >= ct->LBA + ct->sectors) continue;
+      if(lba < ct->LBA) { memset(buf, 0, 2352); cdrfile_deinterleave_subq(buf + 2352, qbuf); return 1; }
+
+      uint32 frame = (uint32)(ct->FileOffset / p_cdrfile->chd_unitbytes) + (uint32)(lba - ct->LBA);
+      uint64 byte_offset = (uint64)frame * p_cdrfile->chd_unitbytes;
+      uint32 hunk = (uint32)(byte_offset / p_cdrfile->chd_hunkbytes);
+      uint32 offset = (uint32)(byte_offset % p_cdrfile->chd_hunkbytes);
+      if(hunk != p_cdrfile->chd_cached_hunk)
+      {
+        if(chd_read(p_cdrfile->chd, hunk, p_cdrfile->chd_hunk) != CHDERR_NONE)
+        { memset(buf, 0, 2352 + 96); return 0; }
+        p_cdrfile->chd_cached_hunk = hunk;
+      }
+      if(offset + p_cdrfile->chd_unitbytes > p_cdrfile->chd_hunkbytes)
+      { memset(buf, 0, 2352 + 96); return 0; }
+
+      const uint8 *raw = p_cdrfile->chd_hunk + offset;
+      if(p_cdrfile->chd_unitbytes >= 2352)
+      {
+        memcpy(buf, raw, 2352);
+        if(p_cdrfile->chd_unitbytes >= 2448) memcpy(buf + 2352, raw + 2352, 96);
+      }
+      else if(ct->DIFormat == DI_FORMAT_MODE1 && p_cdrfile->chd_unitbytes >= 2048)
+      {
+        memset(buf, 0, 2352); memcpy(buf + 16, raw, 2048); lec_encode_mode1_sector(lba + 150, buf);
+      }
+      else { memset(buf, 0, 2352 + 96); return 0; }
+      cdrfile_deinterleave_subq(buf + 2352, qbuf);
+      return 1;
+    }
+    memset(buf, 0, 2352 + 96);
+    return 0;
+  }
+#endif
 
 #ifdef HAVE_LIBCDIO
   if(p_cdrfile->p_cdio)
