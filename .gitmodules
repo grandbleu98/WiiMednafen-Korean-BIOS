@@ -1,3 +1,7 @@
 [submodule "wii-emucommon"]
 	path = wii-emucommon
 	url = https://github.com/raz0red/wii-emucommon.git
+
+[submodule "WiiSXRX-libchdr-source"]
+	path = deps/WiiSXRX_2022240p
+	url = https://github.com/Jokippo/WiiSXRX_2022240p.git
