@@ -98,6 +98,9 @@ SOURCES		:=	\
     src/mednafen/src/hw_video/huc6270 \
     src/mednafen/src/mpcdec \
     src/mednafen/src/cdrom \
+    deps/WiiSXRX_2022240p/deps/libchdr/src \
+    deps/WiiSXRX_2022240p/deps/libchdr/deps/lzma-19.00 \
+    deps/WiiSXRX_2022240p/deps/libchdr/deps/zlib-1.2.13 \
     src/mednafen/src/tremor \
     src/wii \
     src/wii/emulator \
@@ -125,6 +128,7 @@ INCLUDES	:= \
     wii-emucommon/sdl/SDL_ttf/include \
     wii-emucommon/sdl/SDL_image/include \
     src/mednafen/include \
+    deps/WiiSXRX_2022240p/deps/libchdr/include \
     src/mednafen/include/blip \
     src/mednafen/src/drivers \
     src/mednafen/src/md \
