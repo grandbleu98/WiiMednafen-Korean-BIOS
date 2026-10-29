@@ -580,7 +580,7 @@ void MDFNI_StopAVRecord(void)
     struct stat stat_buf;
     std::vector<FileExtensionSpecStruct> valid_iae;
 
-    if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".toc")))
+    if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".toc") || !strcasecmp(name + strlen(name) - 4, ".chd")))
     {
       return(MDFNI_LoadCD(force_module, name));
     }
