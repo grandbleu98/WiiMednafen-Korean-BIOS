@@ -1219,7 +1219,7 @@ static CDRFile *ImageOpenCHD(const char *path)
       if(idx == 0)
       {
         chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret);
-        MDFN_PrintError(_("CHD has no CD track metadata: %s\\n"), path);
+        MDFN_PrintError(_("CHD has no CD track metadata: %s\n"), path);
         return NULL;
       }
       break;
@@ -1257,7 +1257,7 @@ static CDRFile *ImageOpenCHD(const char *path)
     else if(!strcasecmp(type, "MODE2_RAW") || !strcasecmp(type, "MODE2/2352")) track->DIFormat = DI_FORMAT_MODE2_RAW;
     else
     {
-      MDFN_PrintError(_("Unsupported CHD track type: %s\\n"), type);
+      MDFN_PrintError(_("Unsupported CHD track type: %s\n"), type);
       chd_close(ret->chd); fclose(ret->chd_fp); free(ret->chd_hunk); MDFN_free(ret); return NULL;
     }
     track->Format = (track->DIFormat == DI_FORMAT_AUDIO) ? CD_TRACK_FORMAT_AUDIO : CD_TRACK_FORMAT_DATA;
