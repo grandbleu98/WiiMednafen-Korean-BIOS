@@ -174,6 +174,7 @@ CFLAGS	= \
   -Wno-strict-aliasing \
   -Wno-narrowing \
   -DWII \
+  -D_7ZIP_ST \
   -DVB_BPP=8 \
   -DWSWAN_BPP=16 \
   -DGBA_BPP=16 \
