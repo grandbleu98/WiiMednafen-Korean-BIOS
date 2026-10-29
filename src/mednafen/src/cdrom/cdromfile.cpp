@@ -1351,6 +1351,19 @@ int cdrfile_read_raw_sector(CDRFile *p_cdrfile, uint8 *buf, int32 lba)
       switch(ct->DIFormat)
       {
       case DI_FORMAT_AUDIO:
+        if(p_cdrfile->chd_unitbytes < 2352) { memset(buf, 0, 2352 + 96); return 0; }
+        memcpy(buf, raw, 2352);
+        // CHD stores CD-DA samples in big-endian order. Mednafen's CD audio
+        // playback path expects native little-endian 16-bit samples on Wii.
+        for(int si = 0; si < 2352; si += 2)
+        {
+          const uint8 tmp = buf[si];
+          buf[si] = buf[si + 1];
+          buf[si + 1] = tmp;
+        }
+        if(p_cdrfile->chd_unitbytes >= 2448) memcpy(buf + 2352, raw + 2352, 96);
+        break;
+
       case DI_FORMAT_MODE1_RAW:
       case DI_FORMAT_MODE2_RAW:
         if(p_cdrfile->chd_unitbytes < 2352) { memset(buf, 0, 2352 + 96); return 0; }
