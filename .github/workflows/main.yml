@@ -12,6 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
     # The source was imported from a ZIP, so Git submodule metadata for
     # wii-emucommon is not available in this new repository. Clone it with
