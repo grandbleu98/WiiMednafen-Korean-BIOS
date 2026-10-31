@@ -1241,7 +1241,9 @@ static CDRFile *ImageOpenCHD(const char *path)
     CDRFILE_TRACK_INFO *track = &ret->Tracks[track_no];
     memset(track, 0, sizeof(*track));
     track->LBA = running_lba + logical_pregap + virtual_pregap;
-    track->pregap = logical_pregap;
+    // Both generated and stored pregaps occupy logical disc time. A stored
+    // (PGTYPE V...) pregap is read from CHD data; a generated pregap is zero-filled.
+    track->pregap = logical_pregap + virtual_pregap;
     track->index = 1;
     track->sectors = frames - virtual_pregap;
     track->FileOffset = (long)((stored_frames + virtual_pregap) * ret->chd_unitbytes);
@@ -1267,7 +1269,9 @@ static CDRFile *ImageOpenCHD(const char *path)
 
     // CHD v5 pads each track to a four-frame boundary. The padding is part
     // of the physical CHD stream, not part of the emulated disc's LBA space.
-    stored_frames += frames + postgap;
+    // POSTGAP advances logical LBA only; it is not stored in the CHD stream.
+    // Only track frames and CHD's four-frame alignment padding consume storage.
+    stored_frames += frames;
     stored_frames += ((frames + 3) & ~3) - frames;
     running_lba = track->LBA + track->sectors + postgap;
   }
